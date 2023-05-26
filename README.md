@@ -1,2 +1,2 @@
 # Interpolation
-Interpolaton a polynomial in multiple variables
+Interpolation of a multivariable polynomial

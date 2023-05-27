@@ -5,21 +5,21 @@ using namespace std;
 #define fi first
 #define se second
 #define pb push_back
-#pragma GCC optimize("unroll-loops,Ofast")
-#pragma GCC target("avx2,bmi,bmi2,lzcnt,popcnt,tune=native")
 #define cok cout << (ok ? "YES\n" : "NO\n");
 #define dbg(x) cout << (#x) << ": " << (x) << endl;
 #define dbga(x,l,r) cout << (#x) << ": "; for (int ii=l;ii<r;ii++) cout << x[ii] << " "; cout << endl;
 // #define int long long
 #define pi pair<int, int>
-const int N = 7, C = 100000, M = 200;
+const int N = 7, C = 1e7, MAX_DEG = 4, MAX_PRODUCT = 1e5;
 const ld EPS = 1e-9, EPS_CHECK = 1e-9;
 const string SEP = "  (", END = ")\n";
+const bool APPROXIMATION = true;
 array <string, N> names;
-array <int, N> max_exp;
-array<vector<int>, N> POINTS;
-ll DIV[N][M][M];
-ll PW[N][M][M];
+array <int, N> max_exp, powers, current_converted, cur_exp;
+array<vector<ll>, N> POINTS;
+ll DIV[N][MAX_DEG + 1][MAX_DEG + 1], PW[N][MAX_DEG + 1][MAX_DEG + 1];
+ld SUM[MAX_PRODUCT];
+ld F_CACHE[MAX_PRODUCT];
 ll pow(ll a, int b)
 {
 	if (b == 0) return 1;
@@ -29,8 +29,35 @@ ll pow(ll a, int b)
 	if (b & 1) s *= a;
 	return s;
 }
+ld approximate(ld k)
+{
+	int k_ = k;
+	int k__ = k_ + abs(k) / k;
+	if (abs(k - k_) < EPS) return k_;
+	else if (abs(k - k__) < EPS) return k__;
+	else
+	{
+		int i = 1, j = 1;
+		ld ka = abs(k);
+		while (i < C && j < C)
+		{
+			ld p = ka * j;
+			if (abs(p - i) < EPS) break;
+			if (p < i) j++;
+			else i++;
+		}
+		if (i >= C || j >= C) return k;
+		if (k < 0) i = -i;
+		return (ld)i / j;
+	}	
+}
 void normalize(ld k)
 {
+    if (!APPROXIMATION)
+    {
+        cout << k << SEP;
+        return;
+    }
 	int k_ = k;
 	int k__ = k_ + abs(k) / k;
 	if (abs(k - k_) < EPS) cout << k_ << SEP;
@@ -85,7 +112,7 @@ struct monom
 		for (int i=0;i<N;i++) res *= PW[i][v[i]][exp[i]];
 		return k * res;
 	}
-	ld getRandom(array<int, N> v)
+	ld getRandom(array<ll, N> v)
 	{
 		ld res = 1;
 		for (int i=0;i<N;i++) res *= pow(v[i], exp[i]);
@@ -100,7 +127,6 @@ bool operator<(monom a, monom b)
 	if (a.exp < b.exp) return 0;
 	return a.k > b.k;
 }
-bool operator==(monom a, monom b) {return a.exp == b.exp && abs(a.k - b.k) < EPS;}
 struct polynom
 {
 	vector<monom> st;
@@ -109,99 +135,82 @@ struct polynom
 		if (abs(m.k) < EPS) return;
 		st.pb(m);
 	}
-	void print() { if(st.size() == 0) {cout << "Polynom is a constant 0\n"; return;} sort(st.begin(), st.end()); for (monom &m: st) m.display();}
-	ld operator()(array<int, N> v)
-	{
-		ld res = 0;
-		for (auto &m: st) res += m(v);
-		return res;
-	}
-	ld getRandom(array<int, N> v)
+	void print() { if(st.size() == 0) {cout << "Polynom is 0\n"; return;} sort(st.begin(), st.end()); for (monom &m: st) m.display();}
+	ld operator()(array<ll, N> v)
 	{
 		ld res = 0;
 		for (auto &m: st) res += m.getRandom(v);
 		return res;
 	}
 };
-bool operator==(polynom a, polynom b)
-{
-	if (a.st.size() != b.st.size()) return 0;
-	sort(a.st.begin(), a.st.end());
-	sort(b.st.begin(), b.st.end());
-	return a.st == b.st;
-}
-array<int, N> v;
-array<int, N> v_index;
-int tf, tp;
-ld gen(ld f(array<int, N>), array<int, N> &exp, polynom &p, int index=0)
+ld gen(int index=0, int current_hash=0)
 {
 	if (index == N)
 	{
-		ld val = f(v) - p(v_index);
 		ll div = 1;
-		for (int i=0;i<N;i++) div *= DIV[i][v_index[i]][exp[i]];
-		return val / div;
+		for (int i=0;i<N;i++) div *= DIV[i][current_converted[i]][cur_exp[i]];
+		return (ld)(F_CACHE[current_hash] - SUM[current_hash]) / div;
 	}
 	ld res = 0;
-	for (int i=0;i<=exp[index];i++)
+	for (int i=0;i<=cur_exp[index];i++)
 	{
-		v_index[index] = i;
-		v[index] = POINTS[index][i];
-		res += gen(f, exp, p, index + 1);
+		current_converted[index] = i;
+		res += gen(index + 1, current_hash + i * powers[index]);
 	}
 	return res;
 }
-polynom interpolate(ld f(array<int, N>))
+array<int, N> convert(int h)
 {
-    int max_pow = -2e9;
-    for (int x: max_exp) max_pow = max(max_pow, x);
-    for (int i=0;i<max_exp.size();i++) for (int j=0;j<=max_exp[i];j++) POINTS[i].pb(j);
-	for (int i=0;i<N;i++) for (int j=0;j<=max_exp[i];j++) for (int u=0;u<=max_exp[i];u++) DIV[i][j][u] = (u ? DIV[i][j][u - 1] : 1) * (u == j ? 1 : (POINTS[i][j] - POINTS[i][u]));
-    for (int i=0;i<N;i++) for (int j=0;j<=max_exp[i];j++) for (int u=0;u<=max_pow;u++) PW[i][j][u] = u ? PW[i][j][u - 1] * POINTS[i][j] : 1;
+	array<int, N> res;
+	for (int i=0;i<N;i++) res[i] = h / powers[i], h -= res[i] * powers[i];
+	return res;
+}
+array<ll, N> convert_points(int h)
+{
+	array<ll, N> res;
+	for (int i=0;i<N;i++) res[i] = POINTS[i][h / powers[i]], h %= powers[i];
+	return res;
+}
+polynom interpolate(ld f(array<ll, N>))
+{
+    int max_pow = -2e9, sum = 0, h_max = 0;
+    set<int> remaining_points, st;
 	polynom res;
-	int sum = 0;
-	for (int x: max_exp) sum += x;
-	set<pair<int, array<int, N>>> st;
-	st.insert({sum, max_exp});
-	while (st.size())
+    for (int x: max_exp) max_pow = max(max_pow, x), sum += x, h_max = h_max * (x + 1) + x;
+
+    powers[N - 1] = 1;
+    for (int i=N-2;i>-1;i--) powers[i] = powers[i + 1] * (max_exp[i + 1] + 1);
+
+    for (int i=0;i<max_exp.size();i++) for (int j=0;j<=max_exp[i];j++) POINTS[i].pb(j);
+	
+    for (int i=0;i<N;i++) for (int j=0;j<=max_exp[i];j++) for (int u=0;u<=max_exp[i];u++) DIV[i][j][u] = (u ? DIV[i][j][u - 1] : 1) * (u == j ? 1 : (POINTS[i][j] - POINTS[i][u]));
+
+    for (int i=0;i<N;i++) for (int j=0;j<=max_exp[i];j++) for (int u=0;u<=max_pow;u++) PW[i][j][u] = u ? PW[i][j][u - 1] * POINTS[i][j] : 1;
+
+    for (int i=0;i<=h_max;i++) F_CACHE[i] = f(convert_points(i)), remaining_points.insert(i);
+    st.insert(h_max);
+	
+    while (st.size())
 	{
-		auto [deg, v] = *st.rbegin();
-		st.erase({deg, v});
-		deg--;
-		ld K = gen(f, v, res);
-		if (abs(K) > EPS) res.add(monom(v, K));
-		for (int i=0;i<N;i++)
+		int v = *st.rbegin();
+		st.erase(v);
+		remaining_points.erase(v);
+		cur_exp = convert(v);
+		ld k = gen();
+		if (abs(k) > EPS)
 		{
-			if (v[i])
-			{
-				v[i]--;
-				st.insert({deg, v});
-				v[i]++;
-			}
+			if (APPROXIMATION) k = approximate(k);
+			monom mn = monom(cur_exp, k);
+			res.add(mn);
+			for (int i: remaining_points) SUM[i] += mn(convert(i));
 		}
+		for (int i=0;i<N;i++) if (cur_exp[i]) st.insert(v - powers[i]);
 	}
 	return res;
 }
-/*ld f(array<int, N> v)
+ld f(array<ll, N> v)
 {
-	auto [a, b, c, d, e, f, g, h, i, j] = v;
-	ld res = 0;
-	for (int x1=0;x1<a;x1++)
-		for (int x2=0;x2<b;x2++)
-			for (int x3=0;x3<c;x3++)
-				for (int x4=0;x4<d;x4++)
-					for (int x5=0;x5<e;x5++)
-						for (int x6=0;x6<f;x6++)
-							for (int x7=0;x7<g;x7++)
-								for (int x8=0;x8<h;x8++)
-									for (int x9=0;x9<i;x9++)
-										for (int x10=0;x10<j;x10++)
-											res += (ld)312 * x1 * x1 * x6 * x7 * x9 + (ld)-15 * x1 * x8 * x4 * x4 * x5 * x10 * x10 + (ld)228 * x4 * x3 * x3 * x6 * x9 + (ld)-1029 * x5 * x9 * x4 * x4 * x2 + (ld)392 * x2 * x3 * x7 * x7 * x9 * x9 * x10 * x10;
-	return res;
-}*/
-ld f(array<int, N> v)
-{
-	auto[ a, b, c, d, e, f, g] = v;
+	auto [a, b, c, d, e, f, g] = v;
 	ld res = 0;
 	for (int i=0;i<a;i++)
 		for (int j=0;j<b;j++)
@@ -213,16 +222,16 @@ ld f(array<int, N> v)
 								res += 13ll * i * j * u * i * i * u - 49ll * k * k * z * z * y + 90ll * c * u * k * x * x * x;
 	return res;
 }
-void check(polynom p, ld(array<int, N> f))
+void check(polynom p, ld(array<ll, N> f))
 {
 	mt19937 rnd(228);
 	for (int i=0;i<100;i++)
 	{
 		int t = clock();
-		array<int, N> ex;
+		array<ll, N> ex;
 		for (int j=0;j<N;j++) ex[j] = rnd() % 20 + 2;
 		ld F = f(ex);
-		ld P = p.getRandom(ex);
+		ld P = p(ex);
 		if (abs(F - P) > max(EPS_CHECK, EPS_CHECK * abs(F)))
 		{
 			cout << "Polynom is wrong, test " << i << endl;
@@ -242,10 +251,9 @@ signed main()
 
     names = {"a", "b", "c", "d", "e", "f", "g"};
     max_exp = {4, 2, 3, 4, 2, 3, 3};
-
+    
     polynom P = interpolate(f);
     P.print();
-    cout << endl;
     cout << "Checking polynom..." << endl;
     check(P, f);
 }
